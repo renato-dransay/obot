@@ -302,11 +302,17 @@ func (r *railwayBackend) transformConfig(ctx context.Context, server ServerConfi
 }
 
 func (r *railwayBackend) transformedConfig(server ServerConfig, service railwayService) ServerConfig {
+	healthzPath := server.HealthzPath
+	if server.NeedsShim() {
+		healthzPath = "/healthz"
+	}
+
 	return ServerConfig{
 		Runtime:                   otypes.RuntimeRemote,
 		URL:                       fmt.Sprintf("http://%s.railway.internal:%d", service.Name, defaultContainerPort),
 		ContainerPort:             defaultContainerPort,
 		ContainerPath:             server.ContainerPath,
+		HealthzPath:               healthzPath,
 		MCPServerNamespace:        r.environmentID,
 		MCPServerName:             server.MCPServerName,
 		MCPServerDisplayName:      server.MCPServerDisplayName,

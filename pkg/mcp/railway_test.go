@@ -86,6 +86,21 @@ func TestRailwaySpecsContainerizedUsesRealAndShimServices(t *testing.T) {
 	}
 }
 
+func TestRailwayTransformedConfigUsesShimHealthEndpoint(t *testing.T) {
+	t.Parallel()
+
+	b := &railwayBackend{environmentID: "environment"}
+	config := b.transformedConfig(ServerConfig{
+		Runtime:       types.RuntimeContainerized,
+		ContainerPath: "/mcp",
+		MCPServerName: "catalog-server",
+	}, railwayService{ID: "service-1", Name: "obot-mcp-catalog-server"})
+
+	if config.HealthzPath != "/healthz" {
+		t.Fatalf("expected shim readiness endpoint /healthz, got %q", config.HealthzPath)
+	}
+}
+
 func TestRailwayEnsureDeploymentIsIdempotent(t *testing.T) {
 	t.Parallel()
 
