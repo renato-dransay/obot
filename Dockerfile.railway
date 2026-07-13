@@ -12,10 +12,7 @@ RUN if [ "${BASE_IMAGE}" = "cgr.dev/chainguard/wolfi-base" ]; then \
 FROM base AS bin
 WORKDIR /app
 COPY . .
-RUN --mount=type=cache,id=cacheKey-pnpm,target=/root/.local/share/pnpm/store \
-  --mount=type=cache,target=/root/.cache/go-build \
-  --mount=type=cache,target=/root/go/pkg/mod \
-  make all
+RUN make all
 
 FROM cgr.dev/chainguard/wolfi-base:latest AS final-base
 RUN addgroup -g 70 postgres && \
