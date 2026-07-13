@@ -12,7 +12,7 @@ RUN if [ "${BASE_IMAGE}" = "cgr.dev/chainguard/wolfi-base" ]; then \
 FROM base AS bin
 WORKDIR /app
 COPY . .
-RUN make all
+RUN make GIT_TAG="-X 'github.com/obot-platform/obot/pkg/version.Tag=v0.23.2-railway.1'" all
 
 FROM cgr.dev/chainguard/wolfi-base:latest AS final-base
 RUN addgroup -g 70 postgres && \
