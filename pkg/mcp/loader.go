@@ -31,7 +31,14 @@ type Options struct {
 	DisallowLocalhostMCP              bool     `usage:"Disallow MCP containers from connecting to localhost" default:"true"`
 	DisallowPrivateIPMCP              bool     `usage:"Disallow MCP containers from connecting to private IPs" default:"true"`
 	DisallowLinkLocalMCP              bool     `usage:"Disallow MCP containers from connecting to link-local addresses" default:"true"`
-	MCPRuntimeBackend                 string   `usage:"The runtime backend to use for running MCP servers: docker, kubernetes, or k8s. Defaults to docker" default:"docker"`
+	MCPRuntimeBackend                 string   `usage:"The runtime backend to use for running MCP servers: docker, kubernetes, k8s, or railway. Defaults to docker" default:"docker"`
+	MCPRailwayAPIToken                string   `usage:"Railway workspace API token used to manage MCP workload services"`
+	MCPRailwayAPIURL                  string   `usage:"Railway GraphQL API URL" default:"https://backboard.railway.com/graphql/v2"`
+	MCPRailwayProjectID               string   `usage:"Railway project ID where MCP workload services are created"`
+	MCPRailwayEnvironmentID           string   `usage:"Railway environment ID where MCP workload services are created"`
+	MCPRailwayServicePrefix           string   `usage:"Prefix for Railway MCP workload service names" default:"obot-mcp-"`
+	MCPRailwayObotServiceName         string   `usage:"Private Railway service name for this Obot server" default:"obot"`
+	MCPRailwayObotInternalPort        int      `usage:"Private Railway port for this Obot server" default:"8080"`
 	MCPSecretBindingAllowedLabel      string   `usage:"Kubernetes Secret label key required for admin UI secret-binding lookup and save-time validation" default:"obot.obot.ai/allow-secret-binding"`
 	MCPImagePullSecrets               []string `usage:"The name of the image pull secret to use for pulling MCP images"`
 	SingleUserIdleServerShutdownHours int      `usage:"The interval in hours to check for idle MCP servers designated to a single user and shut them down, set to -1 to disable shutdown" default:"24"`
@@ -157,6 +164,11 @@ func NewSessionManager(ctx context.Context, authEnabled bool, tokenService Token
 		}
 
 		backend = newKubernetesBackend(authEnabled, clientset, client, cachedClient, obotStorageClient, opts, resourceMaximums)
+	case RuntimeBackendRailway:
+		backend, err = newRailwayBackend(authEnabled, opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize Railway backend: %w", err)
+		}
 	default:
 		return nil, fmt.Errorf("unknown runtime backend: %s", opts.MCPRuntimeBackend)
 	}
