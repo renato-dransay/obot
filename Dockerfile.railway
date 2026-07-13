@@ -39,6 +39,7 @@ COPY aws-encryption.yaml /
 COPY azure-encryption.yaml /
 COPY gcp-encryption.yaml /
 COPY --chmod=0755 run.sh /bin/run.sh
+COPY --chmod=0755 run-railway.sh /bin/run-railway.sh
 
 COPY --link --from=providers /obot-providers /obot-providers
 COPY --link --from=enterprise-providers /obot-providers /obot-providers
@@ -59,4 +60,4 @@ ENV XDG_CACHE_HOME=/data/cache
 ENV TERM=vt100
 
 WORKDIR /data
-ENTRYPOINT ["run.sh"]
+ENTRYPOINT ["run-railway.sh"]
