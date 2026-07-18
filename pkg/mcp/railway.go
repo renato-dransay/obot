@@ -34,8 +34,6 @@ type railwayBackend struct {
 	containerImage    string
 	remoteShimImage   string
 	authEnabled       bool
-	auditBatchSize    int
-	auditFlushSeconds int
 	startupPollPeriod time.Duration
 	skipReadiness     bool
 }
@@ -47,7 +45,6 @@ type railwayServiceSpec struct {
 	HealthcheckPath string
 	Port            int
 	Variables       map[string]string
-	UpstreamURL     string
 }
 
 type railwayService struct {
@@ -97,14 +94,12 @@ func newRailwayBackend(authEnabled bool, opts Options) (backend, error) {
 		containerImage:    opts.MCPBaseImage,
 		remoteShimImage:   opts.MCPRemoteShimBaseImage,
 		authEnabled:       authEnabled,
-		auditBatchSize:    opts.MCPAuditLogsPersistBatchSize,
-		auditFlushSeconds: opts.MCPAuditLogPersistIntervalSeconds,
 		startupPollPeriod: time.Second,
 	}, nil
 }
 
-func (r *railwayBackend) ensureServerDeployment(ctx context.Context, server ServerConfig, webhooks []Webhook) (ServerConfig, error) {
-	services, err := r.apply(ctx, server, webhooks, true)
+func (r *railwayBackend) ensureServerDeployment(ctx context.Context, server ServerConfig) (ServerConfig, error) {
+	services, err := r.apply(ctx, server, true)
 	if err != nil {
 		return ServerConfig{}, err
 	}
@@ -123,13 +118,13 @@ func (r *railwayBackend) ensureServerDeployment(ctx context.Context, server Serv
 	return result, nil
 }
 
-func (r *railwayBackend) deployServer(ctx context.Context, server ServerConfig, webhooks []Webhook) error {
-	_, err := r.apply(ctx, server, webhooks, false)
+func (r *railwayBackend) deployServer(ctx context.Context, server ServerConfig) error {
+	_, err := r.apply(ctx, server, false)
 	return err
 }
 
-func (r *railwayBackend) apply(ctx context.Context, server ServerConfig, webhooks []Webhook, wait bool) ([]railwayService, error) {
-	specs, err := r.serviceSpecs(server, webhooks)
+func (r *railwayBackend) apply(ctx context.Context, server ServerConfig, wait bool) ([]railwayService, error) {
+	specs, err := r.serviceSpecs(server)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +173,7 @@ func (r *railwayBackend) apply(ctx context.Context, server ServerConfig, webhook
 	return result, nil
 }
 
-func (r *railwayBackend) serviceSpecs(server ServerConfig, webhooks []Webhook) ([]railwayServiceSpec, error) {
+func (r *railwayBackend) serviceSpecs(server ServerConfig) ([]railwayServiceSpec, error) {
 	if len(server.Files) > 0 {
 		return nil, &ErrNotSupportedByBackend{Feature: "MCP file mounts", Backend: RuntimeBackendRailway}
 	}
@@ -204,46 +199,30 @@ func (r *railwayBackend) serviceSpecs(server ServerConfig, webhooks []Webhook) (
 		if _, ok := real.Variables["PORT"]; !ok {
 			real.Variables["PORT"] = strconv.Itoa(server.ContainerPort)
 		}
-		if !server.NeedsShim() {
-			return []railwayServiceSpec{real}, nil
-		}
-		upstream := fmt.Sprintf("http://%s.railway.internal:%d", realName, server.ContainerPort)
-		if server.ContainerPath != "" {
-			upstream += "/" + strings.TrimPrefix(server.ContainerPath, "/")
-		}
-		shimServer := server
-		shimServer.Runtime = otypes.RuntimeRemote
-		shimServer.URL = upstream
-		shim, err := r.nanobotSpec(baseName, shimServer, webhooks)
-		if err != nil {
-			return nil, err
-		}
-		shim.UpstreamURL = upstream
-		return []railwayServiceSpec{real, shim}, nil
+		return []railwayServiceSpec{real}, nil
 	case otypes.RuntimeUVX, otypes.RuntimeNPX, otypes.RuntimeRemote, otypes.RuntimeComposite:
-		return r.singleNanobotSpec(baseName, server, webhooks)
+		return r.singleNanobotSpec(baseName, server)
 	default:
 		return nil, fmt.Errorf("unsupported Railway runtime: %s", server.Runtime)
 	}
 }
 
-func (r *railwayBackend) singleNanobotSpec(name string, server ServerConfig, webhooks []Webhook) ([]railwayServiceSpec, error) {
-	spec, err := r.nanobotSpec(name, server, webhooks)
+func (r *railwayBackend) singleNanobotSpec(name string, server ServerConfig) ([]railwayServiceSpec, error) {
+	spec, err := r.nanobotSpec(name, server)
 	if err != nil {
 		return nil, err
 	}
 	return []railwayServiceSpec{spec}, nil
 }
 
-func (r *railwayBackend) nanobotSpec(name string, server ServerConfig, webhooks []Webhook) (railwayServiceSpec, error) {
+func (r *railwayBackend) nanobotSpec(name string, server ServerConfig) (railwayServiceSpec, error) {
 	env := envSliceToBytes(server.Env)
-	headers := envSliceToBytes(server.Headers)
 	var data []byte
 	var err error
 	if server.Runtime == otypes.RuntimeComposite {
-		data, err = constructMCPServerNanobotYAMLForComposite(server.Components)
+		data, err = constructMCPServerNanobotYAMLForComposite(server)
 	} else {
-		data, err = constructMCPServerNanobotYAML(server.MCPServerDisplayName, server.URL, server.Command, server.Args, server.PassthroughHeaderNames, env, headers, webhooks)
+		data, err = constructMCPServerNanobotYAML(server, env)
 	}
 	if err != nil {
 		return railwayServiceSpec{}, fmt.Errorf("construct nanobot configuration: %w", err)
@@ -253,20 +232,15 @@ func (r *railwayBackend) nanobotSpec(name string, server ServerConfig, webhooks 
 		image = r.containerImage
 	}
 	variables := map[string]string{
-		"OBOT_NANOBOT_CONFIG_B64":                      base64.StdEncoding.EncodeToString(data),
-		"PORT":                                         strconv.Itoa(defaultContainerPort),
-		"NANOBOT_RUN_HEALTHZ_PATH":                     "/healthz",
-		"NANOBOT_RUN_FORCE_FETCH_TOOL_LIST":            "true",
-		"NANOBOT_DISABLE_HEALTH_CHECKER":               "true",
-		"NANOBOT_RUN_LISTEN_ADDRESS":                   ":8099",
-		"NANOBOT_RUN_MCPSERVER_ID":                     strings.TrimSuffix(server.MCPServerName, "-shim"),
-		"NANOBOT_RUN_AUDIT_LOG_TOKEN":                  server.AuditLogToken,
-		"NANOBOT_RUN_AUDIT_LOG_SEND_URL":               server.AuditLogEndpoint,
-		"NANOBOT_RUN_AUDIT_LOG_METADATA":               server.AuditLogMetadata,
-		"NANOBOT_RUN_AUDIT_LOG_BATCH_SIZE":             strconv.Itoa(r.auditBatchSize),
-		"NANOBOT_RUN_AUDIT_LOG_FLUSH_INTERVAL_SECONDS": strconv.Itoa(r.auditFlushSeconds),
+		"OBOT_NANOBOT_CONFIG_B64":           base64.StdEncoding.EncodeToString(data),
+		"PORT":                              strconv.Itoa(defaultContainerPort),
+		"NANOBOT_RUN_HEALTHZ_PATH":          "/healthz",
+		"NANOBOT_RUN_FORCE_FETCH_TOOL_LIST": "true",
+		"NANOBOT_DISABLE_HEALTH_CHECKER":    "true",
+		"NANOBOT_RUN_LISTEN_ADDRESS":        ":8099",
+		"NANOBOT_RUN_MCPSERVER_ID":          strings.TrimSuffix(server.MCPServerName, "-shim"),
 	}
-	if r.authEnabled {
+	if r.authEnabled && server.Runtime == otypes.RuntimeComposite {
 		variables["NANOBOT_RUN_TRUSTED_ISSUER"] = server.Issuer
 		variables["NANOBOT_RUN_OAUTH_JWKSURL"] = server.JWKSEndpoint
 		variables["NANOBOT_RUN_TRUSTED_AUDIENCES"] = strings.Join(server.Audiences, ",")
@@ -302,15 +276,28 @@ func (r *railwayBackend) transformConfig(ctx context.Context, server ServerConfi
 }
 
 func (r *railwayBackend) transformedConfig(server ServerConfig, service railwayService) ServerConfig {
+	port := defaultContainerPort
 	healthzPath := server.HealthzPath
-	if server.NeedsShim() {
-		healthzPath = "/healthz"
+	if server.Runtime == otypes.RuntimeContainerized {
+		port = server.ContainerPort
+	}
+	endpoint := fmt.Sprintf(
+		"http://%s.railway.internal:%d",
+		service.Name,
+		port,
+	)
+	if server.ContainerPath != "" {
+		endpoint = fmt.Sprintf(
+			"%s/%s",
+			endpoint,
+			strings.TrimPrefix(server.ContainerPath, "/"),
+		)
 	}
 
 	return ServerConfig{
 		Runtime:                   otypes.RuntimeRemote,
-		URL:                       fmt.Sprintf("http://%s.railway.internal:%d", service.Name, defaultContainerPort),
-		ContainerPort:             defaultContainerPort,
+		URL:                       endpoint,
+		ContainerPort:             port,
 		ContainerPath:             server.ContainerPath,
 		HealthzPath:               healthzPath,
 		MCPServerNamespace:        r.environmentID,
@@ -326,12 +313,11 @@ func (r *railwayBackend) transformedConfig(server ServerConfig, service railwayS
 		AuthorizeEndpoint:         server.AuthorizeEndpoint,
 		TokenExchangeClientID:     server.TokenExchangeClientID,
 		TokenExchangeClientSecret: server.TokenExchangeClientSecret,
-		AuditLogEndpoint:          server.AuditLogEndpoint,
-		AuditLogToken:             server.AuditLogToken,
 		AuditLogMetadata:          server.AuditLogMetadata,
 		PassthroughHeaderNames:    server.PassthroughHeaderNames,
 		PassthroughHeaderValues:   server.PassthroughHeaderValues,
 		StartupTimeout:            server.StartupTimeout,
+		Webhooks:                  server.Webhooks,
 	}
 }
 
@@ -419,13 +405,19 @@ func (r *railwayBackend) transformObotHostname(rawURL string) string {
 	return parsed.String()
 }
 
+func (r *railwayBackend) remoteConfig(globalConfig RemoteMCPURLValidationConfig) (RemoteMCPURLValidationConfig, []string) {
+	return globalConfig, []string{"*.railway.internal"}
+}
+
 func (r *railwayBackend) rewriteServerEndpoints(server ServerConfig) ServerConfig {
 	server.TokenExchangeEndpoint = r.transformObotHostname(server.TokenExchangeEndpoint)
 	server.AuthorizeEndpoint = r.transformObotHostname(server.AuthorizeEndpoint)
-	server.AuditLogEndpoint = r.transformObotHostname(server.AuditLogEndpoint)
 	server.JWKSEndpoint = r.transformObotHostname(server.JWKSEndpoint)
 	for i := range server.Components {
 		server.Components[i].URL = r.transformObotHostname(server.Components[i].URL)
+	}
+	for i := range server.Webhooks {
+		server.Webhooks[i].URL = r.transformObotHostname(server.Webhooks[i].URL)
 	}
 	return server
 }

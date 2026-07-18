@@ -45,7 +45,7 @@ func newControlTowerServerTestClient(t *testing.T) *client.Client {
 			Spec: v1.UserDefaultRoleSettingSpec{Role: types2.RoleBasic},
 		}).
 		Build()
-	return client.New(context.Background(), db, storageClient, nil, nil, nil, 0, 1, 0, 0, false)
+	return client.New(context.Background(), db, storageClient, nil, nil, nil, nil, 0, 1, 0, 0, false)
 }
 
 func callProvisionControlTowerPrincipal(t *testing.T, groups []string, body string) (int, string, error) {

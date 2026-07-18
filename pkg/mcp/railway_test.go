@@ -42,7 +42,7 @@ func TestRailwaySpecsRemoteUsesPrivateServiceAndMaterializesConfig(t *testing.T)
 		URL:                  "https://example.com/mcp",
 		MCPServerName:        "server_123",
 		MCPServerDisplayName: "Example",
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestRailwaySpecsRemoteUsesPrivateServiceAndMaterializesConfig(t *testing.T)
 	}
 }
 
-func TestRailwaySpecsContainerizedUsesRealAndShimServices(t *testing.T) {
+func TestRailwaySpecsContainerizedUsesDirectService(t *testing.T) {
 	t.Parallel()
 
 	b := &railwayBackend{servicePrefix: "obot-mcp-", remoteShimImage: "nanobot"}
@@ -71,33 +71,31 @@ func TestRailwaySpecsContainerizedUsesRealAndShimServices(t *testing.T) {
 		ContainerPath:        "/mcp",
 		MCPServerName:        "catalog-server",
 		MCPServerDisplayName: "Catalog",
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(specs) != 2 {
-		t.Fatalf("expected real and shim services, got %d", len(specs))
+	if len(specs) != 1 {
+		t.Fatalf("expected one direct service, got %d", len(specs))
 	}
-	if specs[0].Name != "obot-mcp-catalog-server-mcp" || specs[1].Name != "obot-mcp-catalog-server" {
-		t.Fatalf("unexpected service names: %q, %q", specs[0].Name, specs[1].Name)
-	}
-	if got := specs[1].UpstreamURL; got != "http://obot-mcp-catalog-server-mcp.railway.internal:3000/mcp" {
-		t.Fatalf("unexpected private upstream URL %q", got)
+	if specs[0].Name != "obot-mcp-catalog-server-mcp" {
+		t.Fatalf("unexpected service name: %q", specs[0].Name)
 	}
 }
 
-func TestRailwayTransformedConfigUsesShimHealthEndpoint(t *testing.T) {
+func TestRailwayTransformedConfigUsesDirectContainerEndpoint(t *testing.T) {
 	t.Parallel()
 
 	b := &railwayBackend{environmentID: "environment"}
 	config := b.transformedConfig(ServerConfig{
 		Runtime:       types.RuntimeContainerized,
+		ContainerPort: 3000,
 		ContainerPath: "/mcp",
 		MCPServerName: "catalog-server",
 	}, railwayService{ID: "service-1", Name: "obot-mcp-catalog-server"})
 
-	if config.HealthzPath != "/healthz" {
-		t.Fatalf("expected shim readiness endpoint /healthz, got %q", config.HealthzPath)
+	if config.URL != "http://obot-mcp-catalog-server.railway.internal:3000/mcp" {
+		t.Fatalf("unexpected direct endpoint %q", config.URL)
 	}
 }
 
@@ -143,7 +141,7 @@ func TestRailwayEnsureDeploymentIsIdempotent(t *testing.T) {
 		URL:                  "https://example.com/mcp",
 		MCPServerName:        "demo",
 		MCPServerDisplayName: "Demo",
-	}, nil)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +182,7 @@ func TestRailwayBackendIntegration(t *testing.T) {
 			t.Errorf("cleanup Railway service: %v", err)
 		}
 	})
-	deployed, err := rb.ensureServerDeployment(context.Background(), server, nil)
+	deployed, err := rb.ensureServerDeployment(context.Background(), server)
 	if err != nil {
 		t.Fatal(err)
 	}
