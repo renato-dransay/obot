@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	types2 "github.com/obot-platform/obot/apiclient/types"
@@ -87,6 +88,50 @@ func TestProvisionControlTowerPrincipalIsIdempotent(t *testing.T) {
 		t.Fatalf("expected retry to return same user")
 	}
 
+	var keyCount int64
+	if err := c.db.WithContext(ctx).Model(&types.APIKey{}).Count(&keyCount).Error; err != nil {
+		t.Fatalf("count API keys: %v", err)
+	}
+	if keyCount != 1 {
+		t.Fatalf("expected one stored API key, got %d", keyCount)
+	}
+}
+
+func TestProvisionControlTowerPrincipalIsIdempotentUnderConcurrency(t *testing.T) {
+	ctx := context.Background()
+	c := newControlTowerTestClient(t)
+
+	const workers = 8
+	tokens := make(chan string, workers)
+	errors := make(chan error, workers)
+	var wait sync.WaitGroup
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			credential, err := c.ProvisionControlTowerPrincipal(ctx, "ct:user:alice")
+			if err != nil {
+				errors <- err
+				return
+			}
+			tokens <- credential.Token
+		}()
+	}
+	wait.Wait()
+	close(tokens)
+	close(errors)
+
+	for err := range errors {
+		t.Fatalf("concurrent provision: %v", err)
+	}
+	var expected string
+	for token := range tokens {
+		if expected == "" {
+			expected = token
+		} else if token != expected {
+			t.Fatalf("expected one stable token under concurrency")
+		}
+	}
 	var keyCount int64
 	if err := c.db.WithContext(ctx).Model(&types.APIKey{}).Count(&keyCount).Error; err != nil {
 		t.Fatalf("count API keys: %v", err)
