@@ -67,6 +67,12 @@ func (c *Client) ProvisionControlTowerPrincipal(ctx context.Context, subject str
 	if !reserved {
 		return c.waitForControlTowerPrincipalCredential(ctx, subject, name, user.ID)
 	}
+	keepReservation := false
+	defer func() {
+		if !keepReservation {
+			_, _ = c.DeleteCredential(context.WithoutCancel(ctx), controlTowerCredentialContext, name)
+		}
+	}()
 
 	created, err := c.CreateAPIKey(ctx, user.ID, "Control Tower MCP runtime", "Provisioned by Control Tower for MCP runtime access", nil, types.APIKeyScopes{
 		MCPServerIDs: []string{"*"},
@@ -83,8 +89,10 @@ func (c *Client) ProvisionControlTowerPrincipal(ctx context.Context, subject str
 		},
 		CreatedAt: time.Now().UTC(),
 	}); err != nil {
+		_ = c.DeleteAPIKey(context.WithoutCancel(ctx), user.ID, created.ID)
 		return nil, fmt.Errorf("failed to store control tower credential: %w", err)
 	}
+	keepReservation = true
 
 	return &ControlTowerPrincipalCredential{
 		Subject:    subject,
