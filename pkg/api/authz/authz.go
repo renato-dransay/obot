@@ -120,6 +120,8 @@ var (
 		"GET /api/admin-api-keys/{id}",
 		"DELETE /api/admin-api-keys/{id}",
 
+		"POST /api/control-tower/principals",
+
 		"/api/projects",
 		"/api/projects/",
 		"GET /api/nanobot-agents",
