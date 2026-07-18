@@ -26,6 +26,7 @@ const (
 	runtimeBackendDocker          = "docker"
 	RuntimeBackendKubernetes      = "kubernetes"
 	runtimeBackendKubernetesShort = "k8s"
+	RuntimeBackendRailway         = "railway"
 )
 
 func IsKubernetesBackend(backend string) bool {

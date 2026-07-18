@@ -47,6 +47,7 @@ func (s *Server) AddRoutes(mux *server.Server) {
 	mux.HandleFunc("POST /api/users/{user_id}/external", wrap(s.markUserExternal))
 	mux.HandleFunc("DELETE /api/users/{user_id}", wrap(s.deleteUser))
 	mux.HandleFunc("GET /api/active-users", wrap(s.activeUsers))
+	mux.HandleFunc("POST /api/control-tower/principals", wrap(s.provisionControlTowerPrincipal))
 
 	mux.HandleFunc("GET /api/token-usage", wrap(s.systemTokenUsageByUser))
 	mux.HandleFunc("GET /api/total-token-usage", wrap(s.totalSystemTokenUsage))
